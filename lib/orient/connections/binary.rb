@@ -6,15 +6,49 @@ module Orient
 
   module Connections
     class Binary
+      RECORD_LOAD = 30
+      COUNT       = 40
+
       def initialize remote_host, port = 2424, lhost = nil, lport = nil
         @socket = TCPSocket.new remote_host, port, lhost, lport
         @tx     = 0
       end
 
-      def count cluster
-        header = [ 40, @tx ]
+      def record_load cluster_id, record_id, query_plan = "*:-1"
+        header = [ RECORD_LOAD, @tx ]
         header = header.pack('cN')
-        name = cluster.name
+        packet = [
+          cluster_id,
+          record_id >> 32,
+          record_id & 0xFFFF,
+        ].pack 'nNN'
+
+        str = [
+          [ query_plan.bytesize, query_plan ],
+        ]
+        str = str.map { |tuple| [tuple.first].pack('N') + tuple.last }.join
+
+        @socket.write(header + packet + str)
+        response, txid = @socket.read(5).unpack('cN')
+        raise unless response == 0
+
+        @tx += 1
+
+        status = @socket.read(1).unpack('c').first
+        begin
+          len    = @socket.read(4).unpack('N').first
+          record = @socket.read(len)
+          record_version, record_type = @socket.read(5).unpack('Nc')
+          p record
+          p record_type.chr
+          status = @socket.read(1).unpack('c').first
+        end while status == 2
+      end
+
+      def count cluster_name
+        header = [ COUNT, @tx ]
+        header = header.pack('cN')
+        name = cluster_name
         str = [
           [ name.bytesize, name ],
         ]
